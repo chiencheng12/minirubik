@@ -45,6 +45,44 @@ lehmer_w:   .half 720, 120, 24, 6, 2, 1
 pbuf:       .zero 8              # parsed cubie digits
 where:      .zero 8              # where[c] = position of cubie c
 move_name:  .string "R R2R'B B2B'D D2D'"
+#@RENDER_BEGIN
+# ---- LED renderer data (GUI build only) ----
+# Unfolded net on the 35 x 25 LED matrix: faces of 2 x 2 facelets, each
+# facelet 4 px wide and 3 px tall, 1 px gaps:
+#          U
+#       L  F  R  B        face cell (cx, cy) starts at (9 cx, 7 cy)
+#          D
+# net_xy[3 * pos + slot] = (x, y) of the facelet showing slot `slot` of
+# corner position `pos` (README numbering, 0 = anchor). Slot 0 is the
+# U/D sticker, slots 1 and 2 follow clockwise; this is the convention that
+# reproduces solver.c's twist table (derived in tools/derive_net.py).
+.equ DELAY, 30000            # busy-wait iterations between frames
+net_xy:
+    .byte 9, 3,   4, 7,   9, 7     # 0 front-upper-left (anchor): U L F
+    .byte 13, 3,  13, 7,  18, 7    # 1 front-upper-right:          U F R
+    .byte 13, 14, 18, 10, 13, 10   # 2 front-down-right:           D R F
+    .byte 9, 14,  9, 10,  4, 10    # 3 front-down-left:            D F L
+    .byte 13, 0,  22, 7,  27, 7    # 4 back-upper-right:           U R B
+    .byte 13, 17, 27, 10, 22, 10   # 5 back-down-right:            D B R
+    .byte 9, 17,  0, 10,  31, 10   # 6 back-down-left:             D L B
+    .byte 9, 0,   31, 7,  0, 7     # 7 back-upper-left:            U B L
+# home_face[3 * cubie + slot]: colour index of each sticker of a cubie in
+# its home position (0 U, 1 D, 2 F, 3 B, 4 R, 5 L)
+home_face:
+    .byte 0, 5, 2,  0, 2, 4,  1, 4, 2,  1, 2, 5
+    .byte 0, 4, 3,  1, 3, 4,  1, 5, 3,  0, 3, 5
+# source / twist of the three quarter turns, as in solver.c
+q_source:
+    .byte 1, 4, 2, 0, 3, 5, 6,  0, 1, 2, 4, 5, 6, 3,  0, 2, 5, 3, 1, 4, 6
+q_twist:
+    .byte 1, 2, 0, 2, 1, 0, 0,  0, 0, 0, 1, 2, 1, 2,  0, 0, 0, 0, 0, 0, 0
+obuf:       .zero 8              # twist of the cubie at each position 1..7
+tmp_p:      .zero 8
+tmp_o:      .zero 8
+.align 2
+face_rgb:   .word 0xFFFFFF, 0xFFD500, 0x009B48, 0x0046AD, 0xB71234, 0xFF5800
+row_off:    .zero 100            # row_off[y] = y * WIDTH * 4, y < 25
+#@RENDER_END
 
 .align 2
 # @TABLES@
@@ -395,6 +433,9 @@ found:
 # ========================== output ==========================
 # move index = face * 3 + turns - 1; its name is 2 chars at move_name + 2*idx
 print_moves:
+#@RENDER_BEGIN
+    jal  ra, animate
+#@RENDER_END
     mv   t3, s8
     la   t4, move_name
 print_loop:
@@ -421,6 +462,10 @@ print_sep:
     j    print_loop
 
 print_empty:
+#@RENDER_BEGIN
+    mv   s0, s8                  # no moves: just show the solved cube
+    jal  ra, animate
+#@RENDER_END
 print_end:
     li   a0, 10
     li   a7, 11
@@ -433,3 +478,177 @@ invalid:
     li   a0, 2
     li   a7, 93
     ecall
+
+#@RENDER_BEGIN
+# ======================= LED animation (GUI build) =======================
+# Draw the input state, then replay the solution frames s8 .. s0 one move
+# at a time on the cubie arrays pbuf / obuf and redraw after every move.
+# Keeps s0 and s8 for the printer; clobbers the other saved registers.
+animate:
+    mv   s11, ra
+    li   t0, LED_MATRIX_0_WIDTH  # row_off[y] = y * WIDTH * 4, by addition
+    slli t0, t0, 2
+    la   t1, row_off
+    li   t2, 0
+    li   t3, 25
+an_rows:
+    sw   t2, 0(t1)
+    add  t2, t2, t0
+    addi t1, t1, 4
+    addi t3, t3, -1
+    bnez t3, an_rows
+    la   t0, input               # obuf[i] = twist digit of position i + 1
+    addi t0, t0, 7
+    la   t1, obuf
+    li   t2, 7
+an_twist:
+    lbu  t3, 0(t0)
+    addi t3, t3, -49
+    sb   t3, 0(t1)
+    addi t0, t0, 1
+    addi t1, t1, 1
+    addi t2, t2, -1
+    bnez t2, an_twist
+
+    jal  ra, render              # the scrambled cube
+    jal  ra, delay
+    mv   s1, s8                  # cursor over the solution frames
+an_move:
+    beq  s1, s0, an_done
+    lbu  s2, 6(s1)               # face
+    lbu  s3, 7(s1)               # quarter turns: 1, 2 or 3
+an_quarter:
+    mv   a0, s2
+    jal  ra, quarter_turn
+    addi s3, s3, -1
+    bnez s3, an_quarter
+    jal  ra, render              # redraw after each solver move
+    jal  ra, delay
+    addi s1, s1, FRAME
+    j    an_move
+an_done:
+    mv   ra, s11
+    ret
+
+# quarter_turn(a0 = face): pbuf[i] = p[src[i]], obuf[i] = (o[src[i]] + tw[i]) % 3
+quarter_turn:
+    la   t0, pbuf                # copy the arrays first
+    la   t1, obuf
+    la   t2, tmp_p
+    la   t3, tmp_o
+    li   t4, 7
+qt_copy:
+    lbu  t5, 0(t0)
+    sb   t5, 0(t2)
+    lbu  t5, 0(t1)
+    sb   t5, 0(t3)
+    addi t0, t0, 1
+    addi t1, t1, 1
+    addi t2, t2, 1
+    addi t3, t3, 1
+    addi t4, t4, -1
+    bnez t4, qt_copy
+    slli t0, a0, 3
+    sub  t0, t0, a0              # face * 7
+    la   t1, q_source
+    add  t1, t1, t0
+    la   t2, q_twist
+    add  t2, t2, t0
+    la   t3, pbuf
+    la   t4, obuf
+    li   a1, 7
+qt_loop:
+    lbu  t5, 0(t1)               # source position
+    la   t6, tmp_p
+    add  t6, t6, t5
+    lbu  a2, 0(t6)
+    sb   a2, 0(t3)
+    la   t6, tmp_o
+    add  t6, t6, t5
+    lbu  a2, 0(t6)
+    lbu  a3, 0(t2)
+    add  a2, a2, a3
+    li   a3, 3
+    blt  a2, a3, qt_mod_ok
+    addi a2, a2, -3
+qt_mod_ok:
+    sb   a2, 0(t4)
+    addi t1, t1, 1
+    addi t2, t2, 1
+    addi t3, t3, 1
+    addi t4, t4, 1
+    addi a1, a1, -1
+    bnez a1, qt_loop
+    ret
+
+# render: paint all 24 facelets from pbuf / obuf.
+# Position 0 is the anchor (cubie 0, twist 0). Elsewhere cubie c = pbuf + 1
+# with twist o shows, in slot s, its home sticker (s - o) mod 3.
+render:
+    li   a0, 0                   # position
+    la   a1, net_xy
+render_pos:
+    li   t0, 0                   # cubie
+    li   t1, 0                   # twist
+    beqz a0, render_have
+    la   t2, pbuf
+    add  t2, t2, a0
+    lbu  t0, -1(t2)
+    addi t0, t0, 1
+    la   t2, obuf
+    add  t2, t2, a0
+    lbu  t1, -1(t2)
+render_have:
+    slli t2, t0, 1
+    add  t0, t0, t2              # cubie * 3
+    la   t2, home_face
+    add  t0, t0, t2              # &home_face[3 * cubie]
+    li   a2, 0                   # slot
+render_slot:
+    sub  t2, a2, t1              # home slot = (slot - twist) mod 3
+    bgez t2, render_slot_ok
+    addi t2, t2, 3
+render_slot_ok:
+    add  t2, t0, t2
+    lbu  t2, 0(t2)               # colour index
+    slli t2, t2, 2
+    la   t3, face_rgb
+    add  t2, t2, t3
+    lw   t2, 0(t2)               # RGB
+    lbu  t3, 0(a1)               # x
+    lbu  t4, 1(a1)               # y
+    slli t4, t4, 2
+    la   t5, row_off
+    add  t4, t4, t5
+    lw   t4, 0(t4)               # y * WIDTH * 4
+    slli t3, t3, 2
+    add  t3, t3, t4
+    li   t4, LED_MATRIX_0_BASE
+    add  t3, t3, t4              # top-left LED of the facelet
+    la   t5, row_off
+    lw   t5, 4(t5)               # one row = WIDTH * 4 bytes
+    li   t4, 3                   # 3 rows of 4 LEDs
+render_px:
+    sw   t2, 0(t3)
+    sw   t2, 4(t3)
+    sw   t2, 8(t3)
+    sw   t2, 12(t3)
+    add  t3, t3, t5
+    addi t4, t4, -1
+    bnez t4, render_px
+    addi a1, a1, 2
+    addi a2, a2, 1
+    li   t3, 3
+    blt  a2, t3, render_slot
+    addi a0, a0, 1
+    li   t3, 8
+    blt  a0, t3, render_pos
+    ret
+
+delay:
+    li   t0, DELAY
+delay_loop:
+    addi t0, t0, -1
+    bnez t0, delay_loop
+    ret
+#@RENDER_END
