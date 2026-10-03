@@ -12,16 +12,21 @@
 #   place  0..209   positions of cubies 0, 1, 2
 # Heuristic h = max(h_perm, pdb_ol[place * 729 + orient]).
 #
-# v2 table layout (see opt/gen_tables.c): registers hold byte offsets
-# (perm*2, orient*2, place*4) so no lookup needs a shift, and each perm
+# Table layout (see opt/gen_tables.c): registers hold byte offsets
+# (perm*2, orient*4, place*4) so no lookup needs a shift, and each perm
 # move entry carries h_perm of its target in bits 13..15.
+#
+# v3: the three turns of a face are unrolled (no turn counter in the hot
+# path), both prunes compare the raw value against a threshold shifted to
+# the same bit position (no decode before the branch), and pdb_ol uses
+# swapped nibbles so that one ori yields the shift amount.
 #
 # Output: the solution moves separated by spaces (ecall 11, one char at a
 # time, because ecall 4 in Ripes also prints the NUL terminator).
 # Exit code (ecall 93): 0 = solved, 2 = invalid input.
 
 .equ PM_FACE, 10080          # bytes per face in pmh (5040 halves)
-.equ OM_FACE, 1458           # bytes per face in om2 (729 halves)
+.equ OM_FACE, 2916           # bytes per face in om4 (729 words)
 .equ LM_FACE, 840            # bytes per face in lm4 (210 words)
 .equ NO_FACE, 3
 
@@ -31,11 +36,11 @@ input:      .string "21345671111111"
 
 .align 2
 # Search stack, one 12-byte frame per depth 0..11:
-#   +0 perm*2 (half)  +2 orient*2 (half)  +4 place*4 (half)
+#   +0 perm*2 (half)  +2 orient*4 (half)  +4 place*4 (half)
 #   +6 face  +7 turns  +8 last face
 .equ FRAME, 12
 frames:     .zero 144
-face_ptr:   .zero 36             # per face: &pmh[f], &om2[f], &lm4[f]
+face_ptr:   .zero 36             # per face: &pmh[f], &om4[f], &lm4[f]
 lehmer_w:   .half 720, 120, 24, 6, 2, 1
 pbuf:       .zero 8              # parsed cubie digits
 where:      .zero 8              # where[c] = position of cubie c
@@ -48,11 +53,11 @@ move_name:  .string "R R2R'B B2B'D D2D'"
 main:
     # ---- table bases kept in saved registers for the whole search ----
     la   s1, pmh
-    la   s2, om2
+    la   s2, om4
     la   s3, lm4
     la   s4, pdb_perm
-    la   s5, pdb_ol
-    la   s6, place_base2
+    la   s5, pdb_ol_sw
+    la   s6, place_base4
     la   s8, frames
     la   gp, face_ptr            # gp, tp are free in this bare-metal program
     li   tp, 3
@@ -69,7 +74,8 @@ fp_loop:
     sw   t3, 8(t0)
     li   t5, PM_FACE
     add  t1, t1, t5
-    addi t2, t2, OM_FACE
+    li   t5, OM_FACE
+    add  t2, t2, t5
     addi t3, t3, LM_FACE
     addi t0, t0, 12
     addi t4, t4, -1
@@ -194,8 +200,8 @@ lehmer_j:
     # frame 0 = start state, stored as byte offsets
     slli t0, a2, 1
     sh   t0, 0(s8)               # perm * 2
-    slli t0, a1, 1
-    sh   t0, 2(s8)               # orient * 2
+    slli t0, a1, 2
+    sh   t0, 2(s8)               # orient * 4
     slli t0, a3, 2
     sh   t0, 4(s8)               # place * 4
     li   t0, NO_FACE
@@ -209,18 +215,17 @@ lehmer_j:
     slli t1, t1, 2
     srl  t0, t0, t1
     andi t0, t0, 15
-    lhu  t1, 4(s8)               # h_ol with the doubled index
+    lhu  t1, 4(s8)               # h_ol, same access as in the search
     add  t1, s6, t1
     lw   t1, 0(t1)
     lhu  t2, 2(s8)
     add  t1, t1, t2
-    srli t2, t1, 2
+    srli t2, t1, 3
     add  t2, s5, t2
     lbu  t2, 0(t2)
-    andi t1, t1, 2
-    slli t1, t1, 1
-    srl  t2, t2, t1
-    andi t2, t2, 15
+    ori  t1, t1, 24
+    sll  t2, t2, t1
+    srli t2, t2, 28
     bgeu t0, t2, h0_max
     mv   t0, t2
 h0_max:
@@ -230,15 +235,19 @@ h0_max:
 # ============================ IDA* ============================
 # Registers during the search:
 #   s0  frame of the node being expanded (depth d)
-#   s7  bound          s9  face f of the current child
-#   s10 turns of f applied to the child (1..3 = X, X2, X')
-#   s11 rem = bound - (d + 1): largest h a child may have
-#   a1, a2, a3  &pmh[f], &om2[f], &lm4[f]
-#   a4, a5, a6  child perm*2, orient*2, place*4
+#   s7  bound          s9  face f being expanded
+#   s10 turns of f (1..3 = X, X2, X'), written only on descend / found
+#   s11 bound - d: a child is pruned if its h >= s11
+#   t5  s11 << 13  (compared with the raw pmh entry: h_perm sits in 13..15)
+#   t6  s11 << 28  (compared with the pdb_ol nibble shifted to 28..31)
+#   a1, a2, a3  &pmh[f], &om4[f], &lm4[f]
+#   a4, a5, a6  child perm*2, orient*4, place*4
 #   gp  face_ptr       tp  constant 3
 new_bound:
     mv   s0, s8
-    addi s11, s7, -1
+    mv   s11, s7
+    slli t5, s11, 13
+    slli t6, s11, 28
     li   s9, 0
 
 face_setup:                      # start face s9 of the node at s0
@@ -257,37 +266,87 @@ face_ok:
     lhu  a4, 0(s0)               # child starts as a copy of the node
     lhu  a5, 2(s0)
     lhu  a6, 4(s0)
-    li   s10, 0
 
-gen_child:                       # one more quarter turn of face f
+# Each turn block applies one quarter turn to the child (X, then X2,
+# then X') and falls through to the next block when the child is pruned.
+turn1:
     add  t0, a1, a4
     lhu  t0, 0(t0)               # next perm | h_perm << 13
     add  t1, a2, a5
-    lhu  a5, 0(t1)               # next orient * 2
+    lw   a5, 0(t1)               # next orient * 4
     add  t1, a3, a6
     lw   a6, 0(t1)               # next place * 4
-    addi s10, s10, 1
-    srli t2, t0, 13              # h_perm
     slli a4, t0, 19
     srli a4, a4, 18              # (perm & 0x1fff) * 2
-    bgt  t2, s11, next_child     # prune: g + h_perm > bound
-
-    add  t1, s6, a6              # h_ol = nibble(pdb_ol, place*729 + orient)
-    lw   t1, 0(t1)               # place * 729 * 2
-    add  t1, t1, a5              # doubled nibble index
-    srli t2, t1, 2               # byte index
+    bgeu t0, t5, turn2           # prune on h_perm
+    add  t1, s6, a6
+    lw   t1, 0(t1)               # place * 729 * 4
+    add  t1, t1, a5              # 4 * nibble index
+    srli t2, t1, 3
     add  t2, s5, t2
     lbu  t2, 0(t2)
-    andi t1, t1, 2               # odd nibble -> shift by 4
-    slli t1, t1, 1
-    srl  t2, t2, t1
-    andi t2, t2, 15
-    bgt  t2, s11, next_child
-
-    or   t0, a4, a5              # perm == 0 and orient == 0: solved
+    ori  t1, t1, 24              # shift: 24 (even entry) or 28 (odd)
+    sll  t2, t2, t1              # entry now in bits 28..31
+    bgeu t2, t6, turn2           # prune on h_ol
+    or   t0, a4, a5
+    li   s10, 1
     beqz t0, found
+    j    descend
 
-    sb   s9, 6(s0)               # descend: remember where we were
+turn2:
+    add  t0, a1, a4
+    lhu  t0, 0(t0)
+    add  t1, a2, a5
+    lw   a5, 0(t1)
+    add  t1, a3, a6
+    lw   a6, 0(t1)
+    slli a4, t0, 19
+    srli a4, a4, 18
+    bgeu t0, t5, turn3
+    add  t1, s6, a6
+    lw   t1, 0(t1)
+    add  t1, t1, a5
+    srli t2, t1, 3
+    add  t2, s5, t2
+    lbu  t2, 0(t2)
+    ori  t1, t1, 24
+    sll  t2, t2, t1
+    bgeu t2, t6, turn3
+    or   t0, a4, a5
+    li   s10, 2
+    beqz t0, found
+    j    descend
+
+turn3:
+    add  t0, a1, a4
+    lhu  t0, 0(t0)
+    add  t1, a2, a5
+    lw   a5, 0(t1)
+    add  t1, a3, a6
+    lw   a6, 0(t1)
+    slli a4, t0, 19
+    srli a4, a4, 18
+    bgeu t0, t5, next_face
+    add  t1, s6, a6
+    lw   t1, 0(t1)
+    add  t1, t1, a5
+    srli t2, t1, 3
+    add  t2, s5, t2
+    lbu  t2, 0(t2)
+    ori  t1, t1, 24
+    sll  t2, t2, t1
+    bgeu t2, t6, next_face
+    or   t0, a4, a5
+    li   s10, 3
+    beqz t0, found
+    j    descend
+
+next_face:
+    addi s9, s9, 1
+    j    face_setup
+
+descend:
+    sb   s9, 6(s0)               # remember where we were
     sb   s10, 7(s0)
     addi s0, s0, FRAME
     sh   a4, 0(s0)
@@ -295,18 +354,17 @@ gen_child:                       # one more quarter turn of face f
     sh   a6, 4(s0)
     sb   s9, 8(s0)               # last face of the new node
     addi s11, s11, -1
+    slli t5, s11, 13
+    slli t6, s11, 28
     li   s9, 0
-    j    face_setup
-
-next_child:
-    blt  s10, tp, gen_child
-    addi s9, s9, 1
     j    face_setup
 
 backtrack:
     beq  s0, s8, bound_up
     addi s0, s0, -FRAME
     addi s11, s11, 1
+    slli t5, s11, 13
+    slli t6, s11, 28
     lbu  s9, 6(s0)
     lbu  s10, 7(s0)
     slli t0, s9, 3               # restore face pointers and the child
@@ -319,12 +377,15 @@ backtrack:
     lhu  a4, FRAME(s0)
     lhu  a5, 14(s0)
     lhu  a6, 16(s0)
-    j    next_child
+    li   t0, 1                   # resume after turn s10
+    beq  s10, t0, turn2
+    li   t0, 2
+    beq  s10, t0, turn3
+    j    next_face
 
 bound_up:
     addi s7, s7, 1
     j    new_bound
-
 
 found:
     sb   s9, 6(s0)
