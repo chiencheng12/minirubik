@@ -1,0 +1,108 @@
+===== instructions retired
+100000004
+===== wall-clock model execution time (ms)
+3687
+===== max RSS (bytes)
+62406656
+===== wall clock incl. startup (s)
+4.10
+(kind=speed size=50000000 proc=RV32_ISS)
+===== instructions retired
+2000004
+===== wall-clock model execution time (ms)
+9260
+===== max RSS (bytes)
+120504320
+===== wall clock incl. startup (s)
+9.36
+(kind=speed size=1000000 proc=RV32_5S)
+===== instructions retired
+8000006
+===== wall-clock model execution time (ms)
+361
+===== max RSS (bytes)
+178421760
+===== wall clock incl. startup (s)
+0.47
+(kind=mem size=2000000 proc=RV32_ISS)
+===== instructions retired
+8000006
+===== wall-clock model execution time (ms)
+308
+===== max RSS (bytes)
+62554112
+===== wall clock incl. startup (s)
+0.41
+(kind=ctrl size=2000000 proc=RV32_ISS)
+===== instructions retired
+100000004
+===== wall-clock model execution time (ms)
+3715
+===== max RSS (bytes)
+62636032
+===== wall clock incl. startup (s)
+3.81
+(kind=speed size=50000000 proc=RV32_ISS)
+===== instructions retired
+2000004
+===== wall-clock model execution time (ms)
+8983
+===== max RSS (bytes)
+120373248
+===== wall clock incl. startup (s)
+9.08
+(kind=speed size=1000000 proc=RV32_5S)
+===== instructions retired
+8000006
+===== wall-clock model execution time (ms)
+361
+===== max RSS (bytes)
+178536448
+===== wall clock incl. startup (s)
+0.50
+(kind=mem size=2000000 proc=RV32_ISS)
+===== instructions retired
+8000006
+===== wall-clock model execution time (ms)
+306
+===== max RSS (bytes)
+62586880
+===== wall clock incl. startup (s)
+0.40
+(kind=ctrl size=2000000 proc=RV32_ISS)
+===== instructions retired
+100000004
+===== wall-clock model execution time (ms)
+3734
+===== max RSS (bytes)
+62554112
+===== wall clock incl. startup (s)
+3.83
+(kind=speed size=50000000 proc=RV32_ISS)
+===== instructions retired
+2000004
+===== wall-clock model execution time (ms)
+9150
+===== max RSS (bytes)
+117227520
+===== wall clock incl. startup (s)
+9.25
+(kind=speed size=1000000 proc=RV32_5S)
+===== instructions retired
+8000006
+===== wall-clock model execution time (ms)
+360
+===== max RSS (bytes)
+178438144
+===== wall clock incl. startup (s)
+0.47
+(kind=mem size=2000000 proc=RV32_ISS)
+===== instructions retired
+8000006
+===== wall-clock model execution time (ms)
+306
+===== max RSS (bytes)
+62586880
+===== wall clock incl. startup (s)
+0.40
+(kind=ctrl size=2000000 proc=RV32_ISS)
