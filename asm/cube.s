@@ -10,15 +10,19 @@
 #   perm   0..5039  Lehmer rank of the 7 cubies
 #   orient 0..728   base-3 value of the first 6 twists
 #   place  0..209   positions of cubies 0, 1, 2
-# Heuristic h = max(pdb_perm[perm], pdb_ol[place_base[place] + orient]).
+# Heuristic h = max(h_perm, pdb_ol[place * 729 + orient]).
+#
+# v2 table layout (see opt/gen_tables.c): registers hold byte offsets
+# (perm*2, orient*2, place*4) so no lookup needs a shift, and each perm
+# move entry carries h_perm of its target in bits 13..15.
 #
 # Output: the solution moves separated by spaces (ecall 11, one char at a
 # time, because ecall 4 in Ripes also prints the NUL terminator).
 # Exit code (ecall 93): 0 = solved, 2 = invalid input.
 
-.equ PM_FACE, 10080          # bytes per face in pm (5040 halves)
-.equ OM_FACE, 1458           # bytes per face in om (729 halves)
-.equ LM_FACE, 210            # bytes per face in lm (210 bytes)
+.equ PM_FACE, 10080          # bytes per face in pmh (5040 halves)
+.equ OM_FACE, 1458           # bytes per face in om2 (729 halves)
+.equ LM_FACE, 840            # bytes per face in lm4 (210 words)
 .equ NO_FACE, 3
 
 .data
@@ -26,10 +30,12 @@
 input:      .string "21345671111111"
 
 .align 2
-# Search stack, one 8-byte frame per depth 0..11:
-#   +0 perm (half)  +2 orient (half)  +4 place  +5 face  +6 turns  +7 last face
-frames:     .zero 96
-face_ptr:   .zero 36             # per face: &pm[f], &om[f], &lm[f]
+# Search stack, one 12-byte frame per depth 0..11:
+#   +0 perm*2 (half)  +2 orient*2 (half)  +4 place*4 (half)
+#   +6 face  +7 turns  +8 last face
+.equ FRAME, 12
+frames:     .zero 144
+face_ptr:   .zero 36             # per face: &pmh[f], &om2[f], &lm4[f]
 lehmer_w:   .half 720, 120, 24, 6, 2, 1
 pbuf:       .zero 8              # parsed cubie digits
 where:      .zero 8              # where[c] = position of cubie c
@@ -41,13 +47,15 @@ move_name:  .string "R R2R'B B2B'D D2D'"
 .text
 main:
     # ---- table bases kept in saved registers for the whole search ----
-    la   s1, pm
-    la   s2, om
-    la   s3, lm
+    la   s1, pmh
+    la   s2, om2
+    la   s3, lm4
     la   s4, pdb_perm
     la   s5, pdb_ol
-    la   s6, place_base
+    la   s6, place_base2
     la   s8, frames
+    la   gp, face_ptr            # gp, tp are free in this bare-metal program
+    li   tp, 3
 
     # face_ptr[f] = (pm + f*PM_FACE, om + f*OM_FACE, lm + f*LM_FACE)
     la   t0, face_ptr
@@ -182,32 +190,37 @@ lehmer_j:
     add  a3, a3, t4
     add  a3, a3, t5              # place
 
-    # frame 0 = start state
-    sh   a2, 0(s8)
-    sh   a1, 2(s8)
-    sb   a3, 4(s8)
+
+    # frame 0 = start state, stored as byte offsets
+    slli t0, a2, 1
+    sh   t0, 0(s8)               # perm * 2
+    slli t0, a1, 1
+    sh   t0, 2(s8)               # orient * 2
+    slli t0, a3, 2
+    sh   t0, 4(s8)               # place * 4
     li   t0, NO_FACE
-    sb   t0, 7(s8)
+    sb   t0, 8(s8)
 
     # h of the start state; 0 means already solved
-    srli t0, a2, 1
+    srli t0, a2, 1               # h_perm from the packed pdb_perm
     add  t0, s4, t0
     lbu  t0, 0(t0)
     andi t1, a2, 1
     slli t1, t1, 2
     srl  t0, t0, t1
-    andi t0, t0, 15              # h_perm
-    slli t1, a3, 2
+    andi t0, t0, 15
+    lhu  t1, 4(s8)               # h_ol with the doubled index
     add  t1, s6, t1
     lw   t1, 0(t1)
-    add  t1, t1, a1              # place * 729 + orient
-    srli t2, t1, 1
+    lhu  t2, 2(s8)
+    add  t1, t1, t2
+    srli t2, t1, 2
     add  t2, s5, t2
     lbu  t2, 0(t2)
-    andi t1, t1, 1
-    slli t1, t1, 2
+    andi t1, t1, 2
+    slli t1, t1, 1
     srl  t2, t2, t1
-    andi t2, t2, 15              # h_ol
+    andi t2, t2, 15
     bgeu t0, t2, h0_max
     mv   t0, t2
 h0_max:
@@ -220,62 +233,53 @@ h0_max:
 #   s7  bound          s9  face f of the current child
 #   s10 turns of f applied to the child (1..3 = X, X2, X')
 #   s11 rem = bound - (d + 1): largest h a child may have
-#   a1, a2, a3  &pm[f], &om[f], &lm[f]
-#   a4, a5, a6  child perm, orient, place
+#   a1, a2, a3  &pmh[f], &om2[f], &lm4[f]
+#   a4, a5, a6  child perm*2, orient*2, place*4
+#   gp  face_ptr       tp  constant 3
 new_bound:
     mv   s0, s8
     addi s11, s7, -1
     li   s9, 0
 
 face_setup:                      # start face s9 of the node at s0
-    lbu  t0, 7(s0)
+    lbu  t0, 8(s0)
     bne  s9, t0, face_ok
     addi s9, s9, 1               # skip the face that led here
 face_ok:
-    li   t0, 3
-    bgeu s9, t0, backtrack
+    bgeu s9, tp, backtrack
     slli t0, s9, 3
     slli t1, s9, 2
     add  t0, t0, t1              # f * 12
-    la   t1, face_ptr
-    add  t0, t0, t1
+    add  t0, t0, gp
     lw   a1, 0(t0)
     lw   a2, 4(t0)
     lw   a3, 8(t0)
     lhu  a4, 0(s0)               # child starts as a copy of the node
     lhu  a5, 2(s0)
-    lbu  a6, 4(s0)
+    lhu  a6, 4(s0)
     li   s10, 0
 
 gen_child:                       # one more quarter turn of face f
-    slli t0, a4, 1
-    add  t0, a1, t0
-    lhu  a4, 0(t0)
-    slli t0, a5, 1
-    add  t0, a2, t0
-    lhu  a5, 0(t0)
-    add  t0, a3, a6
-    lbu  a6, 0(t0)
+    add  t0, a1, a4
+    lhu  t0, 0(t0)               # next perm | h_perm << 13
+    add  t1, a2, a5
+    lhu  a5, 0(t1)               # next orient * 2
+    add  t1, a3, a6
+    lw   a6, 0(t1)               # next place * 4
     addi s10, s10, 1
+    srli t2, t0, 13              # h_perm
+    slli a4, t0, 19
+    srli a4, a4, 18              # (perm & 0x1fff) * 2
+    bgt  t2, s11, next_child     # prune: g + h_perm > bound
 
-    srli t0, a4, 1               # h_perm = nibble(pdb_perm, perm)
-    add  t0, s4, t0
-    lbu  t0, 0(t0)
-    andi t1, a4, 1
-    slli t1, t1, 2
-    srl  t0, t0, t1
-    andi t0, t0, 15
-    bgt  t0, s11, next_child     # prune: g + h > bound
-
-    slli t1, a6, 2               # h_ol = nibble(pdb_ol, place_base[place] + orient)
-    add  t1, s6, t1
-    lw   t1, 0(t1)
-    add  t1, t1, a5
-    srli t2, t1, 1
+    add  t1, s6, a6              # h_ol = nibble(pdb_ol, place*729 + orient)
+    lw   t1, 0(t1)               # place * 729 * 2
+    add  t1, t1, a5              # doubled nibble index
+    srli t2, t1, 2               # byte index
     add  t2, s5, t2
     lbu  t2, 0(t2)
-    andi t1, t1, 1
-    slli t1, t1, 2
+    andi t1, t1, 2               # odd nibble -> shift by 4
+    slli t1, t1, 1
     srl  t2, t2, t1
     andi t2, t2, 15
     bgt  t2, s11, next_child
@@ -283,50 +287,49 @@ gen_child:                       # one more quarter turn of face f
     or   t0, a4, a5              # perm == 0 and orient == 0: solved
     beqz t0, found
 
-    sb   s9, 5(s0)               # descend: remember where we were
-    sb   s10, 6(s0)
-    addi s0, s0, 8
+    sb   s9, 6(s0)               # descend: remember where we were
+    sb   s10, 7(s0)
+    addi s0, s0, FRAME
     sh   a4, 0(s0)
     sh   a5, 2(s0)
-    sb   a6, 4(s0)
-    sb   s9, 7(s0)               # last face of the new node
+    sh   a6, 4(s0)
+    sb   s9, 8(s0)               # last face of the new node
     addi s11, s11, -1
     li   s9, 0
     j    face_setup
 
 next_child:
-    li   t0, 3
-    blt  s10, t0, gen_child
+    blt  s10, tp, gen_child
     addi s9, s9, 1
     j    face_setup
 
 backtrack:
     beq  s0, s8, bound_up
-    addi s0, s0, -8
+    addi s0, s0, -FRAME
     addi s11, s11, 1
-    lbu  s9, 5(s0)
-    lbu  s10, 6(s0)
+    lbu  s9, 6(s0)
+    lbu  s10, 7(s0)
     slli t0, s9, 3               # restore face pointers and the child
     slli t1, s9, 2
     add  t0, t0, t1
-    la   t1, face_ptr
-    add  t0, t0, t1
+    add  t0, t0, gp
     lw   a1, 0(t0)
     lw   a2, 4(t0)
     lw   a3, 8(t0)
-    lhu  a4, 8(s0)
-    lhu  a5, 10(s0)
-    lbu  a6, 12(s0)
+    lhu  a4, FRAME(s0)
+    lhu  a5, 14(s0)
+    lhu  a6, 16(s0)
     j    next_child
 
 bound_up:
     addi s7, s7, 1
     j    new_bound
 
+
 found:
-    sb   s9, 5(s0)
-    sb   s10, 6(s0)
-    addi s0, s0, 8               # s0 = end of the solution frames
+    sb   s9, 6(s0)
+    sb   s10, 7(s0)
+    addi s0, s0, FRAME           # s0 = end of the solution frames
 
 # ========================== output ==========================
 # move index = face * 3 + turns - 1; its name is 2 chars at move_name + 2*idx
@@ -334,8 +337,8 @@ print_moves:
     mv   t3, s8
     la   t4, move_name
 print_loop:
-    lbu  t0, 5(t3)
-    lbu  t1, 6(t3)
+    lbu  t0, 6(t3)
+    lbu  t1, 7(t3)
     slli t2, t0, 1
     add  t0, t0, t2
     add  t0, t0, t1
@@ -350,7 +353,7 @@ print_loop:
     beq  a0, t6, print_sep
     ecall
 print_sep:
-    addi t3, t3, 8
+    addi t3, t3, FRAME
     beq  t3, s0, print_end
     li   a0, 32
     ecall
