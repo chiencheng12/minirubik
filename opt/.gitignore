@@ -4,3 +4,4 @@ check_all
 fast.rv32.s
 fast.rv32.elf
 tables.h
+verify
