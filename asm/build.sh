@@ -6,6 +6,12 @@
 set -e
 cd "$(dirname "$0")"
 mkdir -p build
+
+# tables.s is generated (and checked: H1, H2, H4) by opt/gen_tables.c.
+if [ ! -s tables.s ] || [ ../opt/gen_tables.c -nt tables.s ]; then
+    ${CC:-cc} -O2 -std=c99 -o ../opt/gen_tables ../opt/gen_tables.c
+    (cd ../opt && ./gen_tables tables.h ../asm/tables.s)
+fi
 state=${1:-}
 
 paste_tables() {
