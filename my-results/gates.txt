@@ -1,0 +1,5 @@
+H2 ok: pdb_perm 5040 entries max 7, pdb_ol 153090 entries max 9
+H4 ok: packed accessor matches at all even and odd indices
+H1 ok: h <= d for all 3674160 states (h == d for 417367, mean gap 1.797), diameter 11
+H3 ok: all 3674160 states solved optimally, paths verified (20.4 s)
+T6 (host): 21345671111111 -> 11 moves

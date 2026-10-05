@@ -1,0 +1,22 @@
+perm                     entries    5040  nibble-packed   2520 B  max h 7
+orient                   entries     729  nibble-packed    365 B  max h 6
+perm x twist{0,1}        entries   45360  nibble-packed  22680 B  max h 8
+perm x twist{0,1,2}      entries  136080  nibble-packed  68040 B  max h 9
+perm x twist{0,3,6}      entries  136080  nibble-packed  68040 B  max h 9
+orient x place{0,1}      entries   30618  nibble-packed  15309 B  max h 8
+orient x place{0,1,2}    entries  153090  nibble-packed  76545 B  max h 9
+orient x place{0,3,6}    entries  153090  nibble-packed  76545 B  max h 9
+
+max(perm, orient)                  worst   639798  mean    206625  (2644 states)
+perm x twist{0,1}                  worst   477005  mean    169422  (2644 states)
+max(perm x twist{0,1}, orient)     worst   157232  mean     53006  (2644 states)
+perm x twist{0,1,2}                worst   232720  mean     65459  (2644 states)
+max(perm x twist{0,1,2}, orient)   worst    82486  mean     24035  (2644 states)
+perm x twist{0,3,6}                worst   254869  mean     65442  (2644 states)
+max(perm x twist{0,3,6}, orient)   worst    96517  mean     22850  (2644 states)
+orient x place{0,1}                worst  1292990  mean    214773  (2644 states)
+max(orient x place{0,1}, perm)     worst   228036  mean     45632  (2644 states)
+orient x place{0,1,2}              worst   462246  mean     52993  (2644 states)
+max(orient x place{0,1,2}, perm)   worst   114384  mean     14616  (2644 states)
+orient x place{0,3,6}              worst   623549  mean     44628  (2644 states)
+max(orient x place{0,3,6}, perm)   worst   154237  mean     12028  (2644 states)
