@@ -1,0 +1,1 @@
+ok: 2644 runs solved optimally; instructions retired: worst 2820014 (12347651111111), mean 379620

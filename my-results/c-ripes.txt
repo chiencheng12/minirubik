@@ -1,0 +1,9 @@
+Program exited with code: 0
+===== instructions retired
+2047324
+Program exited with code: 0
+===== instructions retired
+8841405
+Program exited with code: 0
+===== instructions retired
+8841405
