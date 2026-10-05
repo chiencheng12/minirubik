@@ -1,25 +1,25 @@
 .data
-input:  .asciz "12345672311111"
+input:  .asciz "21345671111111"
+where:  .zero 8                    # 預留 8 byte，存 where[0..6]
 
 .text
 main:
-    la   t0, input
-    addi t0, t0, 7             # 跳過前 7 個排列字元，指到第 8 個字元
-    li   t1, 0                 # t1 = orient，從 0 開始
-    li   t2, 6                 # t2 = 還要讀 6 個
+    la   t0, input                 # t0 = 輸入字元的位址
+    la   t1, where                 # t1 = where 表的起點
+    li   t2, 0                     # t2 = i（位置編號）
+    li   t3, 7                     # t3 = 迴圈上限
 
 loop:
-    lbu  t3, 0(t0)             # 讀 1 個字元（ASCII 碼）
-    addi t3, t3, -49           # '1' 的 ASCII 是 49，減掉後變成 0、1、2
-    slli t4, t1, 1             # t4 = orient << 1（也就是 ×2）
-    add  t1, t4, t1            # orient = ×2 + 自己 = ×3
-    add  t1, t1, t3            # 再加上這次的數字
-    addi t0, t0, 1             # 位址 +1，指到下一個字元
-    addi t2, t2, -1            # 計數器 -1
-    bnez t2, loop              # 不是 0 就跳回去
+    lbu  t4, 0(t0)                 # 讀第 i 個字元
+    addi t4, t4, -49               # '1'~'7' 變成 cubie 編號 0~6
+    add  t5, t1, t4                # t5 = where 起點 + cubie = where[cubie] 的位址
+    sb   t2, 0(t5)                 # where[cubie] = i
+    addi t2, t2, 1                 # i++
+    addi t0, t0, 1                 # 輸入位址 +1
+    bne  t2, t3, loop              # i 還沒到 7 就繼續
 
-    mv   a0, t1                # 印整數要放在 a0
-    li   a7, 1                 # ecall 1 = 印整數
+    lbu  a0, 0(t1)                 # a0 = where[0]
+    li   a7, 1                     # 印整數
     ecall
-    li   a7, 10                # ecall 10 = 結束程式
+    li   a7, 10                    # 結束
     ecall
