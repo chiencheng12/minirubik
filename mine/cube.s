@@ -1,25 +1,48 @@
 .data
 input:  .asciz "21345671111111"
-where:  .zero 8                    # 預留 8 byte，存 where[0..6]
+where:  .zero 8
 
 .text
 main:
-    la   t0, input                 # t0 = 輸入字元的位址
-    la   t1, where                 # t1 = where 表的起點
-    li   t2, 0                     # t2 = i（位置編號）
-    li   t3, 7                     # t3 = 迴圈上限
-
+    # ---- 先建 where 表（和上一題相同）----
+    la   t0, input
+    la   t1, where
+    li   t2, 0
+    li   t3, 7
 loop:
-    lbu  t4, 0(t0)                 # 讀第 i 個字元
-    addi t4, t4, -49               # '1'~'7' 變成 cubie 編號 0~6
-    add  t5, t1, t4                # t5 = where 起點 + cubie = where[cubie] 的位址
-    sb   t2, 0(t5)                 # where[cubie] = i
-    addi t2, t2, 1                 # i++
-    addi t0, t0, 1                 # 輸入位址 +1
-    bne  t2, t3, loop              # i 還沒到 7 就繼續
+    lbu  t4, 0(t0)
+    addi t4, t4, -49
+    add  t5, t1, t4
+    sb   t2, 0(t5)
+    addi t2, t2, 1
+    addi t0, t0, 1
+    bne  t2, t3, loop
 
-    lbu  a0, 0(t1)                 # a0 = where[0]
-    li   a7, 1                     # 印整數
+    # ---- 讀出 a, b, c ----
+    lbu  s0, 0(t1)             # a = where[0]
+    lbu  s1, 1(t1)             # b = where[1]
+    lbu  s2, 2(t1)             # c = where[2]
+
+    # ---- b' = b - (b > a) ----
+    sltu t4, s0, s1            # a < b，也就是 b > a
+    sub  s3, s1, t4            # s3 = b'（s1 的原始 b 要保留）
+
+    # ---- c' = c - (c > a) - (c > b) ----
+    sltu t4, s0, s2            # c > a
+    sltu t5, s1, s2            # c > b（用原始 b）
+    sub  s4, s2, t4
+    sub  s4, s4, t5            # s4 = c'
+
+    # ---- place = a*30 + b'*5 + c' ----
+    slli t4, s0, 5             # a * 32
+    slli t5, s0, 1             # a * 2
+    sub  t4, t4, t5            # a * 30
+    slli t5, s3, 2             # b' * 4
+    add  t5, t5, s3            # b' * 5
+    add  a0, t4, t5
+    add  a0, a0, s4            # + c'
+
+    li   a7, 1                 # 印整數
     ecall
-    li   a7, 10                    # 結束
+    li   a7, 10                # 結束
     ecall
