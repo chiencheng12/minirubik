@@ -1,0 +1,48 @@
+== RV32_ISS 12345671111111
+
+
+Program exited with code: 0
+===== cycles
+351
+===== instructions retired
+351
+== RV32_ISS 13642571111111
+D'
+
+Program exited with code: 0
+===== cycles
+1417
+===== instructions retired
+1417
+== RV32_ISS 21345671111111
+R B' D2 R' B R' B' R D2 R B
+
+Program exited with code: 0
+===== cycles
+3229603
+===== instructions retired
+3229603
+== RV32_5S 12345671111111
+
+
+Program exited with code: 0
+===== cycles
+473
+===== instructions retired
+350
+== RV32_5S 13642571111111
+D'
+
+Program exited with code: 0
+===== cycles
+1790
+===== instructions retired
+1416
+== RV32_5S 21345671111111
+R B' D2 R' B R' B' R D2 R B
+
+Program exited with code: 0
+===== cycles
+3946034
+===== instructions retired
+3229602
