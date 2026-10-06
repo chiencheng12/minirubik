@@ -8,7 +8,8 @@ weights: .word 720, 120, 24, 6, 2, 1
 where:   .zero 8
 move_face: .byte 0, 0, 0, 1, 1, 1, 2, 2, 2   # 走法 m 對應的面
 move_turn: .byte 1, 2, 3, 1, 2, 3, 1, 2, 3   # 走法 m 要轉幾次（1=X, 2=X2, 3=X'）
-path:    .zero 12                            # 記下解法的每一步
+path:    .zero 12      
+move_name: .string "R R2R'B B2B'D D2D'"   # 每個走法的名字，各佔 2 個字元                      # 記下解法的每一步
 .align 2
 frames:  .zero 96                            # 12 層 × 每層 8 byte
 
@@ -190,8 +191,34 @@ found:
     addi s11, s11, 1           # s11 = 解的長度
 search_done:
 
-    mv   a0, s11               # 測試：印出解的長度
-    li   a7, 1
+   # ========== M5: 印出解法 ==========
+    li   t3, 0                 # t3 = i，第幾步
+print_loop:
+    beq  t3, s11, print_end    # 全部印完了
+    beqz t3, no_space
+    li   a0, 32                # 不是第一步：先印一個空格
+    li   a7, 11
+    ecall
+no_space:
+    add  t0, s6, t3
+    lbu  t0, 0(t0)             # t0 = path[i] = 走法 m
+    slli t0, t0, 1             # m × 2（每個名字佔 2 個字元）
+    la   t1, move_name
+    add  t1, t1, t0            # t1 = 這個走法的名字的位址
+    lbu  a0, 0(t1)             # 第 1 個字元（R、B 或 D）
+    li   a7, 11
+    ecall
+    lbu  a0, 1(t1)             # 第 2 個字元
+    li   t2, 32
+    beq  a0, t2, skip_second   # 是空格就不印
+    li   a7, 11
+    ecall
+skip_second:
+    addi t3, t3, 1
+    j    print_loop
+print_end:
+    li   a0, 10                # 換行
+    li   a7, 11
     ecall
     li   a7, 10
     ecall
