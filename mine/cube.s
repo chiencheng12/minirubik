@@ -1,11 +1,16 @@
 .data
 input:   .asciz "21345671111111"
+.align 2
 face_pm: .word 0, 10080, 20160   # pm 每個面 5040 格 × 2 byte = 10080 byte
 face_om: .word 0, 1458, 2916     # om 每個面 729 格 × 2 byte = 1458 byte
 face_lm: .word 0, 210, 420       # lm 每個面 210 格 × 1 byte = 210 byte
-.align 2
 weights: .word 720, 120, 24, 6, 2, 1
 where:   .zero 8
+move_face: .byte 0, 0, 0, 1, 1, 1, 2, 2, 2   # 走法 m 對應的面
+move_turn: .byte 1, 2, 3, 1, 2, 3, 1, 2, 3   # 走法 m 要轉幾次（1=X, 2=X2, 3=X'）
+path:    .zero 12                            # 記下解法的每一步
+.align 2
+frames:  .zero 96                            # 12 層 × 每層 8 byte
 
 .text
 main:
@@ -110,14 +115,82 @@ mul_done:
     bgeu s9, t2, h_done        # h_perm >= h_ol 就不用換
     mv   s9, t2                # 否則 s9 = h_ol
 h_done:                        # s9 = h = 兩者較大的
-   # ========== M4-b: 測試 turn 和 heur ==========
-    mv   a2, s2                # 起始狀態 -> a2, a3, a4
-    mv   a3, s7
-    mv   a4, s8
-    li   a5, 0                 # 面：0 = R, 1 = B, 2 = D
-    jal  ra, turn              # 轉一次
-    jal  ra, heur              # 算轉完的 h，放在 a6
-    mv   a0, a6
+   # ========== M4-c: IDA* 搜尋 ==========
+    la   s5, frames            # s5 = frames 起點
+    la   s6, path              # s6 = path 起點
+    mv   s3, s9                # s3 = bound，從起始 h 開始
+    li   s11, 0                # 起始就解開的情況：長度 0
+    beqz s3, search_done
+
+new_bound:
+    mv   s4, s5                # s4 = 目前這一層的框（第 0 層）
+    li   s11, 0                # s11 = 深度 d
+    sh   s2, 0(s4)             # 第 0 層放起始狀態
+    sh   s7, 2(s4)
+    sb   s8, 4(s4)
+    li   t0, 3
+    sb   t0, 5(s4)             # 上一步的面 = 3（沒有）
+    sb   zero, 6(s4)           # 下一個要試的走法 = 0
+
+search:
+    lbu  t0, 6(s4)             # t0 = 走法 m（0..8）
+    li   t1, 9
+    beq  t0, t1, backtrack     # 9 種都試完了，退回上一層
+    addi t1, t0, 1
+    sb   t1, 6(s4)             # 這層下一次試 m + 1
+
+    la   t1, move_face
+    add  t1, t1, t0
+    lbu  a5, 0(t1)             # a5 = 這個走法的面 f
+    lbu  t1, 5(s4)             # t1 = 上一步的面
+    beq  a5, t1, search        # 同一面不連轉，跳過
+
+    add  t2, s6, s11
+    sb   t0, 0(t2)             # path[d] = m（記下這一步）
+    la   t1, move_turn
+    add  t1, t1, t0
+    lbu  s10, 0(t1)            # s10 = 要轉幾次（1..3）
+
+    lhu  a2, 0(s4)             # 從這層的狀態開始轉
+    lhu  a3, 2(s4)
+    lbu  a4, 4(s4)
+turn_loop:
+    jal  ra, turn
+    addi s10, s10, -1
+    bnez s10, turn_loop
+
+    jal  ra, heur              # a6 = 子節點的 h
+    addi t0, s11, 1            # t0 = 已走步數 g = d + 1
+    add  t0, t0, a6            # t0 = g + h
+    bgtu t0, s3, search        # 超過 bound，放棄這條路
+
+    or   t0, a2, a3            # perm 和 orient 都是 0 = 解開了
+    beqz t0, found
+
+    addi s4, s4, 8             # 往下一層：換到下一個框
+    addi s11, s11, 1
+    sh   a2, 0(s4)
+    sh   a3, 2(s4)
+    sb   a4, 4(s4)
+    sb   a5, 5(s4)             # 記下這一層是轉哪個面來的
+    sb   zero, 6(s4)
+    j    search
+
+backtrack:
+    beqz s11, bound_up         # 已經在第 0 層，這個 bound 找不到
+    addi s4, s4, -8            # 退回上一層
+    addi s11, s11, -1
+    j    search
+
+bound_up:
+    addi s3, s3, 1             # bound + 1，重新搜尋
+    j    new_bound
+
+found:
+    addi s11, s11, 1           # s11 = 解的長度
+search_done:
+
+    mv   a0, s11               # 測試：印出解的長度
     li   a7, 1
     ecall
     li   a7, 10
