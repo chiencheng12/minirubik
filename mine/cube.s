@@ -110,54 +110,69 @@ mul_done:
     bgeu s9, t2, h_done        # h_perm >= h_ol 就不用換
     mv   s9, t2                # 否則 s9 = h_ol
 h_done:                        # s9 = h = 兩者較大的
-# ========== M4-a: 轉一次面 ==========
-    li   s10, 0                # s10 = 面：0 = R, 1 = B, 2 = D
-    slli t6, s10, 2            # t6 = 面 × 4，查 face_* 表用（每格 4 byte）
+   # ========== M4-b: 測試 turn 和 heur ==========
+    mv   a2, s2                # 起始狀態 -> a2, a3, a4
+    mv   a3, s7
+    mv   a4, s8
+    li   a5, 0                 # 面：0 = R, 1 = B, 2 = D
+    jal  ra, turn              # 轉一次
+    jal  ra, heur              # 算轉完的 h，放在 a6
+    mv   a0, a6
+    li   a7, 1
+    ecall
+    li   a7, 10
+    ecall
+    # ---------- turn：對 (a2, a3, a4) 轉一次面 a5 ----------
+turn:
+    slli t6, a5, 2             # t6 = 面 × 4
 
-    # 新 perm = pm[面的起點 + perm × 2]
     la   t0, pm
     la   t1, face_pm
     add  t1, t1, t6
-    lw   t1, 0(t1)             # t1 = 這個面在 pm 裡的偏移
-    add  t0, t0, t1            # t0 = pm 裡這個面的起點
-    slli t2, s2, 1             # perm × 2（pm 每格 2 byte）
+    lw   t1, 0(t1)
+    add  t0, t0, t1            # pm 裡這個面的起點
+    slli t2, a2, 1
     add  t0, t0, t2
-    lhu  a2, 0(t0)             # a2 = 轉完的 perm
+    lhu  a2, 0(t0)             # a2 = 新 perm
 
-    # 新 orient = om[面的起點 + orient × 2]
     la   t0, om
     la   t1, face_om
     add  t1, t1, t6
     lw   t1, 0(t1)
     add  t0, t0, t1
-    slli t2, s7, 1             # orient × 2
+    slli t2, a3, 1
     add  t0, t0, t2
-    lhu  a3, 0(t0)             # a3 = 轉完的 orient
+    lhu  a3, 0(t0)             # a3 = 新 orient
 
-    # 新 place = lm[面的起點 + place]
     la   t0, lm
     la   t1, face_lm
     add  t1, t1, t6
     lw   t1, 0(t1)
     add  t0, t0, t1
-    add  t0, t0, s8            # lm 每格 1 byte，不用乘
-    lbu  a4, 0(t0)             # a4 = 轉完的 place
+    add  t0, t0, a4
+    lbu  a4, 0(t0)             # a4 = 新 place
+    ret
 
-    # 測試：印出三個新值
-    mv   a0, a2
-    li   a7, 1
-    ecall
-    li   a0, 10
-    li   a7, 11
-    ecall
-    mv   a0, a3
-    li   a7, 1
-    ecall
-    li   a0, 10
-    li   a7, 11
-    ecall
-    mv   a0, a4
-    li   a7, 1
-    ecall
-    li   a7, 10
-    ecall
+# ---------- heur：由 (a2, a3, a4) 算出 h，放在 a6 ----------
+heur:
+    la   t0, pdb_perm
+    add  t0, t0, a2
+    lbu  a6, 0(t0)             # a6 = h_perm
+
+    la   t0, place_base
+    slli t1, a4, 2
+    add  t0, t0, t1
+    lw   t1, 0(t0)             # place * 729
+    add  t1, t1, a3            # index = place*729 + orient
+    srli t2, t1, 1
+    la   t0, pdb_ol
+    add  t0, t0, t2
+    lbu  t2, 0(t0)
+    andi t3, t1, 1
+    slli t3, t3, 2
+    srl  t2, t2, t3
+    andi t2, t2, 15            # t2 = h_ol
+    bgeu a6, t2, heur_done
+    mv   a6, t2                # a6 = 兩者較大的
+heur_done:
+    ret
