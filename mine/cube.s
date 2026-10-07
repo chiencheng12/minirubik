@@ -190,6 +190,7 @@ bound_up:
 found:
     addi s11, s11, 1           # s11 = 解的長度
 search_done:
+    # @ANIMATE@
 
    # ========== M5: 印出解法 ==========
     li   t3, 0                 # t3 = i，第幾步
